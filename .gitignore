@@ -65,3 +65,5 @@ temptemp/
 output*.json
 *.sqlite
 *.db
+output_small.json
+output.json

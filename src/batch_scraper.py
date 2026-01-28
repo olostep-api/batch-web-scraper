@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import httpx
 
@@ -17,16 +17,15 @@ class BatchProgress:
     completed_urls: int
 
 
-class OlostepBatchClient:
-    """
-    Minimal async client for Olostep Batch API.
+class BatchScraper:
+    """:
+    Async client for the Olostep Batch API.
 
-    Auth: Authorization: Bearer <token>  :contentReference[oaicite:0]{index=0}
     Endpoints used:
-      - POST   /v1/batches                 :contentReference[oaicite:1]{index=1}
-      - GET    /v1/batches/{batch_id}      :contentReference[oaicite:2]{index=2}
-      - GET    /v1/batches/{batch_id}/items :contentReference[oaicite:3]{index=3}
-      - GET    /v1/retrieve                :contentReference[oaicite:4]{index=4}
+        - POST /v1/batches
+        - GET /v1/batches/{batch_id}
+        - GET /v1/batches/{batch_id}/items
+        - GET /v1/retrieve
     """
 
     def __init__(
@@ -35,6 +34,17 @@ class OlostepBatchClient:
         base_url: str = "https://api.olostep.com",
         timeout: float = 60.0,
     ) -> None:
+        """:
+            Create a `BatchScraper`.
+
+        Args:
+            api_token: Olostep API token.
+            base_url: Olostep API base URL.
+            timeout: Per-request timeout in seconds.
+
+        Returns:
+            None
+        """
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=timeout,
@@ -47,20 +57,17 @@ class OlostepBatchClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def __aenter__(self) -> "OlostepBatchClient":
+    async def __aenter__(self) -> "BatchScraper":
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         await self.aclose()
 
-    # -----------------------------
-    # Core: batches
-    # -----------------------------
     async def create_batch(
         self,
         items: Union[
-            Sequence[str],  # list of URLs
-            Sequence[Dict[str, str]],  # [{"url": "...", "custom_id": "..."}]
+            Sequence[str],
+            Sequence[Dict[str, str]],
         ],
         *,
         country: Optional[str] = None,
@@ -69,8 +76,19 @@ class OlostepBatchClient:
         metadata: Optional[Dict[str, Any]] = None,
         webhook: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """
-        Creates a batch and returns the API response (includes batch "id").
+        """:
+            Create a batch.
+
+        Args:
+            items: Either a list of URLs or a list of dicts with at least `url` (optional `custom_id`).
+            country: Optional country code (e.g. `US`).
+            parser_id: Optional parser id for structured extraction.
+            links_on_page: Optional Olostep `links_on_page` configuration.
+            metadata: Optional metadata passed through to the API.
+            webhook: Optional webhook configuration.
+
+        Returns:
+            The batch create response JSON (includes `id`).
         """
         normalized_items: List[Dict[str, str]] = []
         if items and isinstance(items[0], str):
@@ -101,8 +119,14 @@ class OlostepBatchClient:
         return r.json()
 
     async def get_batch_progress(self, batch_id: str) -> BatchProgress:
-        """
-        Returns (is_completed, total_urls, completed_urls).
+        """:
+            Fetch progress information for a batch.
+
+        Args:
+            batch_id: Batch id returned by `create_batch`.
+
+        Returns:
+            A `BatchProgress` with status and completed/total counts.
         """
         r = await self._client.get(f"/v1/batches/{batch_id}")
         r.raise_for_status()
@@ -119,8 +143,14 @@ class OlostepBatchClient:
         )
 
     async def get_batch(self, batch_id: str) -> Dict[str, Any]:
-        """
-        Returns the full batch JSON from GET /v1/batches/{batch_id}.
+        """:
+            Fetch the full batch object.
+
+        Args:
+            batch_id: Batch id returned by `create_batch`.
+
+        Returns:
+            The batch JSON returned by the API.
         """
         r = await self._client.get(f"/v1/batches/{batch_id}")
         r.raise_for_status()
@@ -133,11 +163,16 @@ class OlostepBatchClient:
         status: Optional[Literal["completed", "failed", "in_progress"]] = None,
         cursor: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """
-        Returns one page of items. Response typically includes:
-          - items: [...]
-          - items_count
-          - cursor (when more results exist)
+        """:
+            Fetch one page of items for a batch.
+
+        Args:
+            batch_id: Batch id returned by `create_batch`.
+            status: Optional filter for item status.
+            cursor: Optional pagination cursor.
+
+        Returns:
+            A page response JSON (typically includes `items` and optionally `cursor`).
         """
         params: Dict[str, Any] = {}
         if status:
@@ -155,8 +190,15 @@ class OlostepBatchClient:
         *,
         status: Optional[Literal["completed", "failed", "in_progress"]] = None,
     ):
-        """
-        Async generator over all items across paginated /items.
+        """:
+            Iterate all items for a batch across pagination.
+
+        Args:
+            batch_id: Batch id returned by `create_batch`.
+            status: Optional filter for item status.
+
+        Returns:
+            An async iterator yielding item dicts from the API.
         """
         cursor: Optional[int] = None
         while True:
@@ -164,24 +206,26 @@ class OlostepBatchClient:
             for item in page.get("items", []) or []:
                 yield item
 
-            # Olostep uses a numeric cursor when more pages exist.
             next_cursor = page.get("cursor", None)
             if next_cursor is None:
                 break
             cursor = int(next_cursor)
 
-    # -----------------------------
-    # Core: retrieve
-    # -----------------------------
     async def retrieve(
         self,
         retrieve_id: str,
         *,
         formats: Formats = ("markdown",),
     ) -> Dict[str, Any]:
-        """
-        Retrieves content for a single retrieve_id.
-        If content is large, API may return hosted URLs + size_exceeded. :contentReference[oaicite:5]{index=5}
+        """:
+            Retrieve content for a single `retrieve_id`.
+
+        Args:
+            retrieve_id: Retrieve id from a completed batch item.
+            formats: Content formats to request (e.g. `("markdown", "html")`).
+
+        Returns:
+            The retrieve response JSON (content fields depend on `formats`).
         """
         params: List[Tuple[str, str]] = [("retrieve_id", retrieve_id)]
         for f in formats:
@@ -190,3 +234,6 @@ class OlostepBatchClient:
         r = await self._client.get("/v1/retrieve", params=params)
         r.raise_for_status()
         return r.json()
+
+
+OlostepBatchClient = BatchScraper

@@ -5,10 +5,12 @@ import json
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, cast
 
-# If your class is in the same file, remove this import and use it directly.
-from olostep import OlostepBatchClient
+from src.batch_scraper import BatchScraper
+
+
+RetrieveFormat = Literal["html", "markdown", "json"]
 
 
 def _ts() -> str:
@@ -23,13 +25,28 @@ async def run(
     country: Optional[str] = None,
     parser_id: Optional[str] = None,
     poll_seconds: float = 5.0,
-    retrieve_formats: Optional[List[str]] = None,
+    retrieve_formats: Optional[List[RetrieveFormat]] = None,
     log_every_n_polls: int = 1,
 ) -> None:
+    """:
+        Run a batch from a CSV and write results to a JSON file.
+
+    Args:
+        csv_path: Path to CSV with columns `custom_id` (or `id`) and `url`.
+        output_json_path: Path to the output JSON file.
+        api_token: Olostep API token.
+        country: Optional country code (e.g. `US`).
+        parser_id: Optional parser id for structured extraction.
+        poll_seconds: Polling interval in seconds.
+        retrieve_formats: Retrieve formats to request (`markdown`, `html`, `json`).
+        log_every_n_polls: Log progress every N polls.
+
+    Returns:
+        None
+    """
     if retrieve_formats is None:
         retrieve_formats = ["markdown"]
 
-    # 1) Load CSV rows: expects columns: custom_id (or id), url
     items: List[Dict[str, str]] = []
     with open(csv_path, "r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -50,8 +67,7 @@ async def run(
             "No valid rows found. Ensure CSV has non-empty 'custom_id' (or 'id') and 'url' columns."
         )
 
-    async with OlostepBatchClient(api_token=api_token) as client:
-        # 2) Create batch
+    async with BatchScraper(api_token=api_token) as client:
         batch_resp = await client.create_batch(
             items, country=country, parser_id=parser_id
         )
@@ -61,7 +77,6 @@ async def run(
 
         print(f"[{_ts()}] Created batch: {batch_id} (urls={len(items)})")
 
-        # 3) Poll until completed (log status + completed/total)
         poll_i = 0
         start = time.time()
         last_completed: Optional[int] = None
@@ -71,7 +86,6 @@ async def run(
             poll_i += 1
             progress = await client.get_batch_progress(batch_id)
 
-            # Log every N polls OR when progress changes
             should_log = poll_i % max(1, log_every_n_polls) == 0
             changed = (progress.completed_urls != last_completed) or (
                 progress.total_urls != last_total
@@ -93,7 +107,6 @@ async def run(
 
         final_batch = await client.get_batch(batch_id)
 
-        # 4) Fetch completed items + retrieve content, build output
         results: List[Dict[str, Any]] = []
         completed_count = 0
 
@@ -113,13 +126,12 @@ async def run(
                 )
                 continue
 
-            # optional small progress log while retrieving
             if completed_count % 50 == 0:
                 print(
                     f"[{_ts()}] Retrieving content... {completed_count} completed items processed"
                 )
 
-            retrieved = await client.retrieve(retrieve_id, formats=retrieve_formats)  # type: ignore[arg-type]
+            retrieved = await client.retrieve(retrieve_id, formats=retrieve_formats)
             results.append(
                 {
                     "custom_id": custom_id,
@@ -147,7 +159,6 @@ async def run(
             "failed_items": failed_items,
         }
 
-        # 5) Save JSON
         with open(output_json_path, "w", encoding="utf-8") as out:
             json.dump(payload, out, ensure_ascii=False, indent=2)
 
@@ -191,7 +202,14 @@ def main() -> None:
     if not args.token:
         raise SystemExit("Missing API token. Pass --token or set OLOSTEP_API_TOKEN.")
 
-    formats = [f.strip() for f in args.formats.split(",") if f.strip()]
+    allowed_formats = {"markdown", "html", "json"}
+    formats_raw = [f.strip() for f in args.formats.split(",") if f.strip()]
+    if invalid := [f for f in formats_raw if f not in allowed_formats]:
+        raise SystemExit(
+            f"Invalid --formats value(s): {', '.join(invalid)}. "
+            "Allowed: markdown, html, json."
+        )
+    formats: List[RetrieveFormat] = [cast(RetrieveFormat, f) for f in formats_raw]
 
     asyncio.run(
         run(
