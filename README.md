@@ -52,9 +52,9 @@ heat-004,https://heat.gov/tools-resources/extreme-heat-vulnerability-mapping-too
 
 ```bash
 python main.py \
-  --csv data/urls.sample.csv \
+  --csv data/urls_sample.csv \
   --out output.json \
-  --country US \
+  --country US \ ## Optional leave empty to make it random
   --formats markdown
 ```
 

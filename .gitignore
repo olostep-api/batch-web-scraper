@@ -67,3 +67,4 @@ output*.json
 *.db
 output_small.json
 output.json
+data/urls.sample_development.csv
