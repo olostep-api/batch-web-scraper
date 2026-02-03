@@ -1,3 +1,5 @@
+## `src/batch_scraper.py`
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -5,8 +7,8 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import httpx
 
-
 Formats = Sequence[Literal["html", "markdown", "json"]]
+ItemStatus = Literal["completed", "failed"]
 
 
 @dataclass(frozen=True)
@@ -18,7 +20,7 @@ class BatchProgress:
 
 
 class BatchScraper:
-    """:
+    """
     Async client for the Olostep Batch API.
 
     Endpoints used:
@@ -34,17 +36,6 @@ class BatchScraper:
         base_url: str = "https://api.olostep.com",
         timeout: float = 60.0,
     ) -> None:
-        """:
-            Create a `BatchScraper`.
-
-        Args:
-            api_token: Olostep API token.
-            base_url: Olostep API base URL.
-            timeout: Per-request timeout in seconds.
-
-        Returns:
-            None
-        """
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=timeout,
@@ -65,19 +56,16 @@ class BatchScraper:
 
     async def create_batch(
         self,
-        items: Union[
-            Sequence[str],
-            Sequence[Dict[str, str]],
-        ],
+        items: Union[Sequence[str], Sequence[Dict[str, str]]],
         *,
         country: Optional[str] = None,
         parser_id: Optional[str] = None,
         links_on_page: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        webhook: Optional[Dict[str, Any]] = None,
+        webhook: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """:
-            Create a batch.
+        """
+        Create a batch.
 
         Args:
             items: Either a list of URLs or a list of dicts with at least `url` (optional `custom_id`).
@@ -85,7 +73,7 @@ class BatchScraper:
             parser_id: Optional parser id for structured extraction.
             links_on_page: Optional Olostep `links_on_page` configuration.
             metadata: Optional metadata passed through to the API.
-            webhook: Optional webhook configuration.
+            webhook: Optional webhook URL (string) to get notified when batch completes.
 
         Returns:
             The batch create response JSON (includes `id`).
@@ -119,14 +107,8 @@ class BatchScraper:
         return r.json()
 
     async def get_batch_progress(self, batch_id: str) -> BatchProgress:
-        """:
-            Fetch progress information for a batch.
-
-        Args:
-            batch_id: Batch id returned by `create_batch`.
-
-        Returns:
-            A `BatchProgress` with status and completed/total counts.
+        """
+        Fetch progress information for a batch.
         """
         r = await self._client.get(f"/v1/batches/{batch_id}")
         r.raise_for_status()
@@ -143,14 +125,8 @@ class BatchScraper:
         )
 
     async def get_batch(self, batch_id: str) -> Dict[str, Any]:
-        """:
-            Fetch the full batch object.
-
-        Args:
-            batch_id: Batch id returned by `create_batch`.
-
-        Returns:
-            The batch JSON returned by the API.
+        """
+        Fetch the full batch object.
         """
         r = await self._client.get(f"/v1/batches/{batch_id}")
         r.raise_for_status()
@@ -160,25 +136,22 @@ class BatchScraper:
         self,
         batch_id: str,
         *,
-        status: Optional[Literal["completed", "failed", "in_progress"]] = None,
+        status: Optional[ItemStatus] = None,
         cursor: Optional[int] = None,
+        limit: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """:
-            Fetch one page of items for a batch.
+        """
+        Fetch one page of items for a batch.
 
-        Args:
-            batch_id: Batch id returned by `create_batch`.
-            status: Optional filter for item status.
-            cursor: Optional pagination cursor.
-
-        Returns:
-            A page response JSON (typically includes `items` and optionally `cursor`).
+        Docs: uses cursor + limit pagination (recommended limit 10-50).
         """
         params: Dict[str, Any] = {}
         if status:
             params["status"] = status
         if cursor is not None:
             params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = limit
 
         r = await self._client.get(f"/v1/batches/{batch_id}/items", params=params)
         r.raise_for_status()
@@ -188,21 +161,17 @@ class BatchScraper:
         self,
         batch_id: str,
         *,
-        status: Optional[Literal["completed", "failed", "in_progress"]] = None,
+        status: Optional[ItemStatus] = None,
+        limit: int = 50,
     ):
-        """:
-            Iterate all items for a batch across pagination.
-
-        Args:
-            batch_id: Batch id returned by `create_batch`.
-            status: Optional filter for item status.
-
-        Returns:
-            An async iterator yielding item dicts from the API.
+        """
+        Iterate all items for a batch across pagination.
         """
         cursor: Optional[int] = None
         while True:
-            page = await self.list_batch_items(batch_id, status=status, cursor=cursor)
+            page = await self.list_batch_items(
+                batch_id, status=status, cursor=cursor, limit=limit
+            )
             for item in page.get("items", []) or []:
                 yield item
 
@@ -215,21 +184,17 @@ class BatchScraper:
         self,
         retrieve_id: str,
         *,
-        formats: Formats = ("markdown",),
+        formats: Optional[Formats] = ("markdown",),
     ) -> Dict[str, Any]:
-        """:
-            Retrieve content for a single `retrieve_id`.
+        """
+        Retrieve content for a single `retrieve_id`.
 
-        Args:
-            retrieve_id: Retrieve id from a completed batch item.
-            formats: Content formats to request (e.g. `("markdown", "html")`).
-
-        Returns:
-            The retrieve response JSON (content fields depend on `formats`).
+        Docs define `formats` as an optional array. If omitted, all formats are returned.
         """
         params: List[Tuple[str, str]] = [("retrieve_id", retrieve_id)]
-        for f in formats:
-            params.append(("formats[]", f))
+        if formats:
+            for f in formats:
+                params.append(("formats", f))
 
         r = await self._client.get("/v1/retrieve", params=params)
         r.raise_for_status()
