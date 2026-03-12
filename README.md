@@ -1,66 +1,97 @@
-# Batch Web Scraper (CSV → JSON)
+# Olostep Batch Web Scraper
 
-Open-source batch web scraper built on the Olostep Batch API. Feed it a CSV of URLs and get back a single JSON file containing the extracted content (markdown/html/json), plus a list of any failed URLs.
+Batch scrape website URLs from CSV with the [Olostep API](https://www.olostep.com/). This project provides both a Streamlit UI and a CLI for creating batches, polling progress, retrieving `markdown`/`html`/`json` content, and saving a single JSON output with completed and failed items.
 
-## Features
+![Olostep Batch Web Scraper UI](ui.png)
 
-- CSV input (`custom_id` or `id`, `url`) so outputs map back to your records
-- Creates a batch, polls progress, then retrieves content (`markdown`/`html`/`json`)
-- Handles large batches (thousands of URLs; Olostep supports up to ~10k per batch depending on your account)
-- Cursor pagination (`cursor` + `limit`, recommended 10–50) when reading batch items
-- Saves failed items too (`failed_count`, `failed_items`)
-- Logs a warning when Olostep returns `size_exceeded=true` (content provided via hosted URLs)
+## Why This Project
 
-## How it works
+This project helps you:
+- Process large URL lists from CSV in a single batch run.
+- Keep every result mapped back to your own `custom_id`.
+- Monitor live progress and logs in the Streamlit UI.
+- Export one JSON payload with completed results and failed URLs.
+- Use an [Olostep Parser](https://docs.olostep.com/features/structured-content/parsers) when you need structured extraction.
 
-1) Read a CSV of URLs (with your own `custom_id` per row)
-2) Create an Olostep batch
-3) Poll until the batch completes
-4) List completed/failed items (`GET /v1/batches/{batch_id}/items`)
-5) Retrieve content for completed items (`GET /v1/retrieve`)
-6) Write everything to a single JSON file
-
-## Requirements
+## Prerequisites
 
 - Python 3.9+
-- An Olostep API token/key
+- An [Olostep](https://www.olostep.com/) account with a valid API key or API token.
 
-## Quick start
+## Quick Start
 
-### Setup
+Create and activate a virtual environment, then install dependencies:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-export OLOSTEP_API_TOKEN="YOUR_TOKEN"
-# or
-export OLOSTEP_API_KEY="YOUR_TOKEN"
 ```
 
-### Input CSV
+Create `.env` in the project root:
 
-Your CSV must have a header row and these columns:
-
-* `custom_id` (or `id`) — your identifier so you can map results back to your records
-* `url` — the page to process
-
-Example: `data/urls_sample.csv`
-
-```csv
-custom_id,url
-heat-003,https://heat.gov/tools-resources/cdc-heatrisk-dashboard/
-heat-004,https://heat.gov/tools-resources/extreme-heat-vulnerability-mapping-tool/
+```bash
+OLOSTEP_API_KEY=your_olostep_api_key_here
 ```
 
-### Run
+This repo also accepts `OLOSTEP_API_TOKEN`. You can create an API key from the [Olostep API Keys dashboard](https://www.olostep.com/dashboard/api-keys).
+
+Run the Streamlit UI:
+
+```bash
+streamlit run app.py
+```
+
+Or run the CLI:
+
+```bash
+python main.py --csv data/urls_sample.csv --out output.json --formats markdown
+```
+
+## What It Does
+
+For each batch run, the workflow:
+1. Reads a CSV with `custom_id` or `id`, plus `url`.
+2. Creates a batch through [Olostep Batch](https://docs.olostep.com/features/batches/batches).
+3. Polls the batch until processing completes.
+4. Lists completed and failed items with cursor-based pagination.
+5. Retrieves content for completed items from `/v1/retrieve`.
+6. Writes a single JSON payload with batch metadata, results, and failed items.
+
+## Run Modes
+
+### Streamlit UI
+
+Launch:
+
+```bash
+streamlit run app.py
+```
+
+UI includes:
+- CSV upload.
+- Retrieve format selection.
+- Live batch status and progress.
+- Streaming logs during batch execution.
+- JSON download after the run completes.
+
+### CLI
+
+Default run:
+
+```bash
+python main.py --csv data/urls_sample.csv --out output.json
+```
+
+Example with additional options:
 
 ```bash
 python main.py \
   --csv data/urls_sample.csv \
   --out output.json \
   --country US \
-  --formats markdown
+  --parser-id your_parser_id \
+  --formats markdown,html
 ```
 
 You can also pass the token directly:
@@ -69,29 +100,34 @@ You can also pass the token directly:
 python main.py --csv data/urls_sample.csv --out output.json --token "YOUR_TOKEN"
 ```
 
-## Common options
+## Input CSV Format
 
-* `--country`: ISO 3166-1 alpha-2 country code (e.g. `US`, `IN`) (default: empty)
-* `--parser-id`: use an Olostep Parser for structured extraction
-* `--poll-seconds`: polling interval (default `5.0`)
-* `--formats`: comma-separated list of retrieve formats (`markdown,html,json`)
-* `--items-limit`: page size for `/v1/batches/{batch_id}/items` pagination (docs recommend `10–50`, default `50`)
-* `--log-level`: log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`) (default `INFO`, or `LOG_LEVEL` env var)
+Required columns:
+- `custom_id` or `id`
+- `url`
+
+Example:
+
+```csv
+custom_id,url
+heat-003,https://heat.gov/tools-resources/cdc-heatrisk-dashboard/
+heat-004,https://heat.gov/tools-resources/extreme-heat-vulnerability-mapping-tool/
+```
+
+Sample file:
+- `data/urls_sample.csv`
 
 ## Output JSON
 
-The output file (e.g. `output.json`) contains:
+The output file contains:
+- `batch` and `batch_id` for the final Olostep batch object.
+- `requested_count`, `results_count`, and `failed_count` summary fields.
+- `results` with `custom_id`, `url`, `retrieve_id`, and retrieved content.
+- `failed_items` for URLs returned as failed batch items.
 
-* `batch` / `batch_id`: the final batch object (from `GET /v1/batches/{batch_id}`) and its ID
-* `results`: one entry per completed item, including:
+If content is too large, Olostep may return `*_hosted_url` fields instead of inline content. Hosted URLs typically expire after about 7 days, so download what you need promptly.
 
-  * `custom_id`, `url`, `retrieve_id`
-  * `retrieved`: the `/v1/retrieve` response (content fields depend on `--formats`)
-* `failed_count` / `failed_items`: items returned by `GET /v1/batches/{batch_id}/items?status=failed`
-
-Note: if content is too large, Olostep may return `*_hosted_url` fields instead of inline content. This repo logs a warning when `size_exceeded=true`. Hosted URLs expire after ~7 days, so store/download what you need soon.
-
-### Example output (trimmed)
+### Example Output
 
 ```json
 {
@@ -117,6 +153,33 @@ Note: if content is too large, Olostep may return `*_hosted_url` fields instead 
 }
 ```
 
-## Get an API key
+## Common Options
 
-* Olostep: [https://www.olostep.com/](https://www.olostep.com/)
+- `--country`: Set the ISO 3166-1 alpha-2 country code such as `US` or `IN`.
+- `--parser-id`: Use an [Olostep Parser](https://docs.olostep.com/features/structured-content/parsers) for structured extraction.
+- `--poll-seconds`: Control the polling interval between batch status checks.
+- `--formats`: Request `markdown`, `html`, or `json` from `/v1/retrieve`.
+- `--items-limit`: Control page size for `/v1/batches/{batch_id}/items` pagination.
+- `--log-every`: Log batch status every N polls in CLI mode.
+
+## Project Structure
+
+```text
+.
+├── app.py                  # Streamlit UI for CSV upload, progress, and JSON download
+├── main.py                 # CLI entrypoint for batch runs
+├── data/
+│   └── urls_sample.csv     # Sample batch input file
+├── src/
+│   ├── batch_scraper.py    # Async client for batch and retrieve endpoints
+│   └── batch_workflow.py   # CSV parsing, polling, retrieval, and payload helpers
+├── requirements.txt        # Python dependencies
+├── output.json             # Example output artifact
+└── ui.png                  # UI preview image used in this README
+```
+
+## Olostep References
+
+- [Olostep Documentation](https://docs.olostep.com/)
+- [Olostep Batch Guide](https://docs.olostep.com/features/batches/batches)
+- [Olostep Parsers Documentation](https://docs.olostep.com/features/structured-content/parsers)

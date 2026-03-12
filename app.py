@@ -63,7 +63,7 @@ def inject_styles() -> None:
         }
 
         .hero-bubble {
-            background: linear-gradient(135deg, rgba(99, 91, 255, 0.94) 0%, rgba(181, 177, 255, 0.78) 42%, rgba(236, 239, 253, 0.98) 78%, rgba(255, 255, 255, 0.98) 100%);
+            background: linear-gradient(135deg, rgba(146, 141, 255, 0.86) 0%, rgba(194, 191, 255, 0.76) 42%, rgba(236, 239, 253, 0.98) 78%, rgba(255, 255, 255, 0.98) 100%);
             border: 1px solid rgba(99, 91, 255, 0.16);
             border-radius: 22px;
             padding: 1.25rem 1.35rem;
@@ -425,7 +425,7 @@ def render_header() -> None:
         """
         <div class="hero-bubble">
             <span class="eyebrow">Olostep Batch Scraper</span>
-            <h1 class="page-title">Simple batch run</h1>
+            <h1 class="page-title">Batch Scraper</h1>
             <p class="page-subtitle">
                 Select a CSV, choose the formats you want back, run the batch,
                 and watch the logs stream in.
